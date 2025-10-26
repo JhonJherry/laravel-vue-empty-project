@@ -1,53 +1,55 @@
-# ================================
-#  Etapa 1: Compilar assets con Node (Vite)
-# ================================
+# ==========================================================
+# 🏗️ ETAPA 1: Construcción del frontend con Node + Vite
+# ==========================================================
 FROM node:20-alpine AS build
 
+# Establecer directorio de trabajo
 WORKDIR /app
 
-# Copiar dependencias del frontend
+# Copiar archivos necesarios
 COPY package*.json ./
 RUN npm ci
 
-# Copiar todo el código (para compilar)
+# Copiar todo el proyecto
 COPY . .
 
-# Compilar assets de producción (Vite)
+# Desactivar el plugin Wayfinder en producción (si lo usas)
+ENV NODE_ENV=production
+
+# Ejecutar build de Vite (no necesita PHP)
 RUN npm run build
 
-
-# ================================
-#  Etapa 2: Preparar Laravel con PHP + Composer
-# ================================
+# ==========================================================
+# 🧩 ETAPA 2: Backend con PHP-FPM + Composer
+# ==========================================================
 FROM php:8.3-fpm-alpine AS backend
 
-# Instalar extensiones necesarias para Laravel
+# Instalar dependencias del sistema
 RUN apk add --no-cache \
     bash git curl zip unzip libpng-dev libjpeg-turbo-dev freetype-dev icu-dev oniguruma-dev libzip-dev mysql-client \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install pdo pdo_mysql mbstring exif pcntl bcmath gd intl zip opcache
 
-# Instalar Composer globalmente
-COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
-
+# Establecer directorio de trabajo
 WORKDIR /var/www/html
 
-# Copiar archivos de Laravel
+# Copiar composer desde una imagen oficial (más rápido)
+COPY --from=composer:2.7 /usr/bin/composer /usr/bin/composer
+
+# Copiar archivos del proyecto
 COPY . .
 
-# Copiar el build generado por Node
+# Copiar los assets compilados desde la etapa anterior
 COPY --from=build /app/public/build ./public/build
 
-# Instalar dependencias PHP sin las de desarrollo
-RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress
+# Instalar dependencias PHP
+RUN composer install --no-dev --optimize-autoloader
 
-# Limpiar caches y optimizar Laravel
-RUN php artisan config:cache && \
-    php artisan route:cache && \
-    php artisan view:cache
+# Permisos correctos para Laravel
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Establecer permisos correctos
-RUN chown -R www-data:www-data storage bootstrap/cache
-
+# Puerto expuesto por PHP-FPM
 EXPOSE 9000
+
+# Comando final
 CMD ["php-fpm"]
